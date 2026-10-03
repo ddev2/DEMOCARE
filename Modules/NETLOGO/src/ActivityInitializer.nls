@@ -1,0 +1,95 @@
+to AssignActivity [file]
+  file-close-all
+  file-open file
+  let header file-read-line
+  let counter 1
+  let separator ","
+  let activityTable []
+  foreach n-values (length header) [ ?1 -> ?1 ] [ ?1 ->
+    if item ?1 header = "," [
+      set counter counter + 1
+    ]
+  ]
+  while [not file-at-end?] [
+    let allFields []
+    let tvar file-read-line
+    foreach n-values counter [ ?1 -> ?1 ] [
+      let cut ifelse-value (position separator tvar != false) [(position separator tvar)] [length tvar]
+      let field substring tvar 0 cut
+      carefully [
+        if is-number? read-from-string field [
+          set field read-from-string field
+        ]
+      ] [
+      ]
+      set allFields lput field allFields
+      if (position separator tvar != false) [
+        set tvar substring tvar ((position separator tvar) + 1) length tvar
+      ]
+    ]
+    set activityTable lput allFields activityTable
+  ]
+  
+  ; Remove activity levels = A, only levels != A are assigned, A-levels are the remainder
+  ; As a stand-alone reporter this could be: /* set activityTable filter [row -> item 3 row != "A"] activityTable */
+  ; but here it is still needed for case-testing
+  set gFilteredActivityTable filter [row -> item 3 row != "A"] activityTable
+  
+  ;print "ACTIVITY INIT"
+
+  setActivity turtles
+end
+
+; daniel nov-dec 2017 (transformation in a procedure called at setup and when updating dependency
+; BUG FIX (2026-08-18): this procedure had the exact same sequential-quota
+; bug as the old AssignDependency [DependencyInitializer.nls] -- nested
+; foreach loops over activityLevel/dependencyLevel/statusLevel/sexLevel/
+; ageLevel, picking "nAgents = round(proportion * count(remaining pool))"
+; turtles via n-of for each activity level IN SEQUENCE, where the pool
+; ("... and t_activity = A") shrinks after each level is assigned. Here it
+; matters MORE than in AssignDependency: setActivity is called every tick
+; (see democare.nlogo, right after ask actives [ UpdateDependency ]) for
+; every turtle whose dependency just changed that tick (gTurtleUpdateSet),
+; not just once at setup -- so the under-assignment of non-"A" activity
+; levels compounds tick after tick for the whole run, not just at tick 0.
+; t_activity/t_activityRecoded feed the care-hours/labour-activity lookup in
+; CareUpdate.nls, so a persistent bias here plausibly affects care supply
+; throughout the simulation, not just at the start.
+;
+; Replaced with the same per-agent independent cumulative-probability draw
+; used in AssignDependency, matching R's sample_categorical()/init_activity().
+; act_dependencyLevels/act_statusLevels/act_sexLevels/act_activityLevels/
+; act_ageLevels (previously computed above and used only by the old loop
+; structure below) are no longer needed and are no longer set.
+to setActivity [turtleSet]
+  ask turtleSet with [t_activity = "A"] [
+    let myDep t_dependency
+    let myStatus t_status
+    let mySex t_gender
+    let myAge t_age
+    let myRows filter [
+      row ->
+      item 0 row = myDep and item 1 row = myStatus and item 2 row = mySex and (
+        (item 4 row = 105 and myAge >= 105) or
+        item 4 row = myAge
+      )
+    ] gFilteredActivityTable
+    if not empty? myRows [
+      let dice random-float 1
+      let cum 0
+      let assigned false
+      foreach myRows [
+        row ->
+        if not assigned [
+          set cum cum + item 5 row
+          if dice < cum [
+            set t_activity item 3 row
+            set t_activityRecoded ifelse-value (item 3 row = "C") [1][2]
+            set assigned true
+          ]
+        ]
+      ]
+    ]
+  ]
+end
+;end daniel

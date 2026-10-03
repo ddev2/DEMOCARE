@@ -1,0 +1,19 @@
+# DEMOCARE repository: code and documentation only, no data files.
+# Everything is ignored, then the code and documentation are allowed back in.
+*
+!*/
+!.gitignore
+!README.md
+!docs/**
+!Modules/**/README.md
+!Modules/computeCare_R/*.R
+!Modules/R PAPER/R code/*.R
+!Modules/NETLOGO/src/*.nls
+!Modules/NETLOGO/src/*.nlogo
+!Modules/NETLOGO/activity/*.R
+
+# tidyverse engine: dropped in September 2026, not distributed
+Modules/computeCare_R/computeCare_tidyverse*.R
+# Google Drive and macOS files
+Icon?
+.DS_Store

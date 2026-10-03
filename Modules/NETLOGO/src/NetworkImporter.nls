@@ -1,0 +1,22 @@
+to-report ImportNetwork [file]
+  file-close-all
+  file-open file
+  let separator ","
+  let header file-read-line
+  
+  let linkTable []
+  while [not file-at-end?] [
+    let tvar file-read-line
+    let fieldList []
+    let nodeOrigin (read-from-string substring tvar 0 position separator tvar) - 1
+    set tvar substring tvar (position separator tvar + 1) length tvar
+    let nodeDestination read-from-string substring tvar 0 position separator tvar - 1
+    set tvar substring tvar (position separator tvar + 1) length tvar
+    let linkType substring tvar 0 position separator tvar
+    set tvar substring tvar (position separator tvar + 1) length tvar
+    let idfam read-from-string substring tvar 0 length tvar
+    set linkTable lput (list nodeOrigin nodeDestination linkType idfam) linkTable
+  ]
+  file-close-all
+  report linkTable
+end

@@ -1,0 +1,22 @@
+to UpdateDependency
+  let dice random-float 1
+  let ageRecodedDependency t_age
+  ifelse t_age < 20 [
+    set ageRecodedDependency 0
+  ][
+    ifelse t_age > 104 [
+      set ageRecodedDependency 84
+    ][
+      set ageRecodedDependency ageRecodedDependency - 20
+    ]
+  ]
+  
+  let thresholdValue item t_genderRecoded item t_statusRecoded item ageRecodedDependency item t_dependency gDependencyTransitionsArray
+  if dice < thresholdValue [
+    set t_dependency t_dependency + 1
+    ;change the activity level in case more dependent
+    set t_activity "A"
+    set t_activityRecoded 0
+    set gTurtleUpdateSet (turtle-set self gTurtleUpdateSet)
+  ]
+end

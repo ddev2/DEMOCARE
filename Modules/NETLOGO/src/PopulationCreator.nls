@@ -1,0 +1,64 @@
+to CreatePopulation [agentList hasIdFamily egoIdx]
+  ;; 2026-08-11: population files may now carry a leading "idFamily" column
+  ;; (added so whole families can be pulled out/duplicated directly from
+  ;; the population file for bootstrap resampling). hasIdFamily comes from
+  ;; ImportPopulation, which detects it from the header. When present,
+  ;; every other field below shifts one position to the right, and we
+  ;; read the true family id straight from the file instead of defaulting
+  ;; to (who) -- CreateNetwork will still overwrite it later for anyone
+  ;; who shows up in the links file, same as before; this only changes
+  ;; the value used for isolated individuals who never appear there.
+  ;; Older files (no idFamily column) keep working exactly as before.
+  ;;
+  ;; 2026-08-11: the file's tail also changed -- older files end
+  ;; ...,linked,ego,useful, newer files end ...,ego ("linked"/"useful"
+  ;; are never used). egoIdx is looked up by name in ImportPopulation, so
+  ;; it works for either layout without assuming a fixed offset here.
+  let offset ifelse-value hasIdFamily [1][0]
+  foreach agentList [
+    agentVars ->
+    create-actives 1 [
+      setxy random-xcor random-ycor
+      set t_gender item (1 + offset) agentVars
+      set t_genderRecoded ifelse-value (t_gender = "F") [0][1]
+      set color ifelse-value (t_gender = "M") [blue][green]
+      set t_age read-from-string item (2 + offset) agentVars
+      ;; BUG FIX (2026-08-16): "ageDef" (the age this individual reaches at
+      ;; tickOut) was never read at all before -- needed now so
+      ;; UpdateSurvival [democare.nlogo] can (re)compute t_age correctly
+      ;; every active tick instead of just incrementing a running total
+      ;; (which silently froze while a turtle was inactive/dormant -- see
+      ;; UpdateSurvival's comment for the full explanation). t_age here is
+      ;; still set from the raw "age" column too, just as a harmless
+      ;; placeholder for the dormant period before a turtle's first
+      ;; UpdateSurvival call recomputes it properly.
+      set t_ageDef read-from-string item (3 + offset) agentVars
+      set t_status item (4 + offset) agentVars
+      set t_statusRecoded ifelse-value (t_status = "A") [0][ifelse-value (t_status = "B") [1][2]] ;order is always {A B M}
+      set tickIn read-from-string item (5 + offset) agentVars
+      if (tickIn != 0) [
+        set breed inactives
+        set hidden? true
+      ]
+      set tickOut read-from-string item (6 + offset) agentVars
+      set t_kinTypeRelEgo -1
+      set t_isEgo ifelse-value (item egoIdx agentVars = "TRUE") [true][false] ;; position looked up by name (see egoIdx above); fixed 2026-08-07 for a prior hardcoded-offset bug that read the wrong column and wrongly marked ~98% of individuals as egos
+      if t_isEgo [ set t_kinTypeRelEgo kEgo ]
+      set t_isPartner false
+      set t_isChildren false
+      set t_isChildrenInLaw false
+      set t_isGrandChildren false
+
+      set t_childrenSet no-turtles
+      set t_maritalStatus kSingle
+      set t_hasPartnerEgo false
+      set t_hasChildrenEgo false
+      set t_hasChildrenInLawEgo false
+      set t_childrenNeedCare false
+      set t_idfamily ifelse-value hasIdFamily [read-from-string item 0 agentVars][(who)]
+      set t_activity "A"
+      set t_activityRecoded 0
+      set t_dependency 0
+    ]
+  ]
+end

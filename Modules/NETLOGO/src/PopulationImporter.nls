@@ -1,0 +1,70 @@
+to-report ImportPopulation [file]
+  let agentList []
+  file-close-all
+
+  if not file-exists? file [
+    user-message (word "File does not exist")
+    report (list [] false 0)
+  ]
+  file-open file
+
+  ;; Count variables in file
+  let header file-read-line
+  let separator ifelse-value (member? "," header) [","][";"]
+  let counter 1
+  foreach n-values (length header) [ i -> i ] [
+    i ->
+    if item i header = separator [
+      set counter counter + 1
+    ]
+  ]
+
+  ;; Extract variables in header
+  let headerVariables []
+  while [position separator header != 0 and position separator header != false] [
+    set headerVariables lput substring header 0 (position separator header) headerVariables
+    set header substring header (position separator header + 1) (length header)
+  ]
+  ;; the loop above stops as soon as no separator is left in the
+  ;; remainder, which drops the very last column name (fixed 2026-08-11:
+  ;; this used to be harmless since nothing looked headerVariables up by
+  ;; name, but now "ego" can BE that last column -- see egoIdx below).
+  set headerVariables lput header headerVariables
+
+  ;; 2026-08-11: population files may now carry a leading "idFamily"
+  ;; column (added so whole families can be pulled out/duplicated
+  ;; directly from the population file for bootstrap resampling). Older
+  ;; files don't have it. Detect which format this file is from the
+  ;; first entry of the header, and hand that flag back to the caller so
+  ;; CreatePopulation knows whether the fixed-order id/sex/age/.../
+  ;; tickOut fields are shifted by one.
+  let hasIdFamily (not empty? headerVariables) and (item 0 headerVariables = "idFamily")
+
+  ;; 2026-08-11: the tail of the file also changed format -- older files
+  ;; end ...,linked,ego,useful, newer files end ...,ego ("linked" and
+  ;; "useful" are never read anywhere). Rather than assume where "ego"
+  ;; sits, look its position up by name in the header so either layout
+  ;; works.
+  let egoIdx position "ego" headerVariables
+  if egoIdx = false [
+    user-message (word "Population file " file " has no 'ego' column in its header")
+    report (list [] false 0)
+  ]
+
+  ;; Extract agent variables
+  while [not file-at-end?] [
+    let factorsList []
+    let tvar file-read-line
+    foreach n-values counter [ i -> i ] [
+      let cut ifelse-value (position separator tvar != false) [(position separator tvar)][length tvar]
+      let field substring tvar 0 cut
+      set factorsList lput field factorsList
+      if (position separator tvar != false) [
+        set tvar substring tvar ((position separator tvar) + 1) length tvar
+      ]
+    ]
+    set agentList lput factorsList agentList
+  ]
+  file-close-all
+  report (list agentList hasIdFamily egoIdx)
+end

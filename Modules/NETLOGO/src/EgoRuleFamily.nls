@@ -1,0 +1,57 @@
+;to ego-rule-family
+;  
+;  if care < 0 [
+;    let familyset myfamily
+;    let familycare 0
+;    let totalcare care
+;    let idpartnerc ""
+;    let partnercare 0
+;    
+;    if any? partner-neighbors [
+;      set idpartner (item 0 [who] of link-neighbors)
+;      set familyset remove idpartner familyset
+;      if [care] of turtle idpartner < 0 [
+;        set totalcare totalcare + [care] of turtle idpartner
+;        set partnercare [care] of turtle idpartner
+;        
+;      ]
+;    ]
+;    
+;    if not empty? familyset [
+;      foreach familyset [ ?1 ->
+;        ask turtle ?1 [
+;          if breed = actives [
+;            set familycare familycare + care
+;          ]
+;        ]
+;      ]
+;    ]
+;    
+;    if familycare > 0 [
+;      let ownshare abs (care / totalcare)
+;      let partnershare abs (partnercare / totalcare)
+;      
+;      
+;      if (abs (care - (- carebypartner)) = (familycare * ownshare))[ set  carebyChildren  abs  (familycare * ownshare)]
+;      if (abs (care - (- carebypartner)) < (familycare * ownshare))[ set  carebyChildren   abs (care - (- carebypartner))]
+;      if (abs (care - (- carebypartner)) > (familycare * ownshare))[set  carebyChildren abs (familycare * ownshare) ]
+;
+;      set care ifelse-value (care + familycare * ownshare > 0) [0][(care + familycare * ownshare)]
+;
+;      if idpartner != "" [
+;        ask turtle idpartner [
+;          set care ifelse-value (care + familycare * partnercare > 0) [0][(care + familycare * partnershare)]
+;        ]
+;      ]
+;    ]
+;  ]
+;
+;  if (carebypartner > 0) or (carebyChildren > 0) [
+;    
+;    if (CareNeeded + (carebyChildren + carebypartner) < 0) [set  mixedinformal (carebyChildren + carebypartner) ]
+;    if (CareNeeded + (carebyChildren + carebypartner) >= 0) [set  mixedinformal 0 ]
+;    
+;    if (CareNeeded + (carebyChildren + carebypartner) < 0) [set  mixedformal abs (CareNeeded + (carebyChildren + carebypartner))]
+;    if (CareNeeded + (carebyChildren + carebypartner) >= 0) [set  mixedformal 0 ]
+;  ]
+;end

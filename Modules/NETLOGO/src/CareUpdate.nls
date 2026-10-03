@@ -1,0 +1,1142 @@
+to UpdateCare
+  set t_care item t_dependency item t_activityRecoded item (ageLimited t_age) gCareArray
+  set t_care2 t_care
+  
+  resetCare self false
+  
+  deficitCare self
+  
+  ;if showInfo? [show "Care updated"]
+end
+
+
+to computeCare [agentEgo debug]
+  
+;if debug [
+;    print "before resetCareFamily"
+;    explore_showFamily agentEgo kDebug
+;  ]
+
+  resetCareFamily agentEgo debug
+  
+;if debug [
+;    print "after resetCareFamily"
+;    explore_showFamily agentEgo kDebug
+;  ]
+
+  if not care2Only? [
+    explore_totalCare agentEgo debug
+    ; 1. CARE BETWEEN SIBLINGS
+    ; 2. CARE GIVEN BY PARENTS TO THEIR CHILDREN
+    explore_netCare_Children agentEgo debug
+    ; 3. CARE BETWEEN PARTNERS
+    explore_netCare_Partners agentEgo debug
+    ;if debug [ explore_showFamily agentEgo kDebug ]
+    ; 4. CHILDREN CARE THEIR PARENTS
+    explore_netCare_Parents agentEgo debug
+
+    ; if debug [ checkCare agentEgo debug ]
+    ; CHECK RESULTS
+    checkCare agentEgo debug
+  
+    ; ACTUALIZE EGO-ACCOUNTS VARIABLES
+    egoCareKind agentEgo debug
+    egoAccountsActualize agentEgo debug
+  ]
+  
+  egoCare2Kind agentEgo debug
+  
+  ; if showInfo? and gCount_debug < 10 [explore_showFamily agentEgo kDebug]
+  
+  care2Update agentEgo debug
+
+  if care2Only? [egoAccountsActualize2 agentEgo]
+  
+  set gCount_debug gCount_debug + 1
+end
+
+to deficitCare [agent]
+  set t_cr_young 0                      ; number of hours of care lost for being young
+  set t_cr_dep 0                        ; number of hours of care lost for being dependent
+  set t_cr_work 0                       ; number of hours of care lost for working
+
+  if t_care = kMaxCare [stop]
+  ifelse t_age <= kAgeNoDep [
+    set t_cr_young kMaxCare
+  ][
+    ifelse t_dependency > 1 [
+      set t_cr_dep kMaxCare
+    ][
+      set t_cr_dep (item 0 item t_activityRecoded item (ageLimited t_age) gCareArray) - (item t_dependency item t_activityRecoded item (ageLimited t_age) gCareArray)
+      set t_cr_work (item 0 item 0 item (ageLimited t_age) gCareArray) - (item 0 item t_activityRecoded item (ageLimited t_age) gCareArray)
+    ]
+  ]
+end
+
+to plotsUpdate
+  plot_dep
+end
+
+to plot_dep
+  set plot_d0 (count actives with [t_isEgo and t_dependency = 0]) * 100 / g_nEgos
+  set plot_d1 (count actives with [t_isEgo and t_dependency = 1]) * 100 / g_nEgos
+  set plot_d2 (count actives with [t_isEgo and t_dependency = 2]) * 100 / g_nEgos
+  set plot_d3 (count actives with [t_isEgo and t_dependency = 3]) * 100 / g_nEgos
+end
+
+to resetCare [agent debug]
+; reset values of turtles variable to zero or initial state, before computing everything
+
+  ifelse t_care > 0 [
+    set t_careSupply t_care
+    set t_netCareSupply t_care
+    set t_careDemand 0
+    set t_netCareDemand 0
+  ][
+    set t_careSupply 0
+    set t_netCareSupply 0
+    set t_careDemand abs(t_care)
+    set t_netCareDemand t_careDemand
+  ]
+
+  set t_careGivenToEgo 0
+  set t_careGivenToPartnerEgo 0
+  set t_careGivenToOtherRelatives 0
+  set t_carebyPartner 0
+  set t_carebyChildren 0
+  set t_carebyParents 0
+  set t_carebyBrothers 0
+  
+  set t_childrenNeedCare false
+  
+  if t_isEgo [set t_ego-accounts n-values kLengthEgoAccount [0]]
+  
+  let myActivePartners countPartner agent kActive
+  set t_nActivePartner count myActivePartners
+  let myFutureActivePartners countPartner agent kActiveInTheFuture
+  set t_nFutureActivePartner count myFutureActivePartners
+  set t_nDeadPartner t_nPartner - t_nActivePartner - t_nFutureActivePartner
+  
+  let myActiveChildren getChildrenSet agent kNoInLaws kActive
+  set t_nActiveChildren count myActiveChildren
+  let myFutureActiveChildren getChildrenSet agent kNoInLaws kActiveInTheFuture
+  set t_nFutureActiveChildren count myFutureActiveChildren
+  set t_nDeadChildren t_nChildren - t_nActiveChildren - t_nFutureActiveChildren
+  
+  let myActiveInLaws getChildrenSet agent kOnlyInLaws kActive
+  set t_nActiveInLaws count myActiveInLaws
+  let myFutureActiveInLaws getChildrenSet agent kOnlyInLaws kActiveInTheFuture
+  set t_nFutureActiveInLaws count myFutureActiveInLaws
+  set t_nDeadInLaws t_nInLaws - t_nActiveInLaws - t_nFutureActiveInLaws
+  
+ ; if debug [ print (word who " fam: " t_idfamily " myChildren " t_nChildren " myInLaws " t_nInLaws) ]
+  
+  resetCare2 agent
+
+end
+
+to explore_totalCare [agent debug]
+; compute theoricalCareAvailable variable: maximum number of hours of care in the family network
+; supposing that each kin can contribute 60 hours at most
+; (we don't take into account now whether relatives are aged more than 16 years of age)
+
+  if showInfo? and gCount_debug < 10 [show (word "explore_totalCare: Family " gCount_debug)]
+
+  set t_ego-accounts replace-item kTotalHoursLivings t_ego-accounts 0
+  set t_ego-accounts replace-item kTotalAvailable t_ego-accounts 0
+  set t_ego-accounts replace-item kPartnerHoursLiving t_ego-accounts 0
+  set t_ego-accounts replace-item kPartnerAvailable t_ego-accounts 0
+
+  set gAgents_sum 0
+  let tot 0
+  let partnerTheoretical 0
+  let partnerCareAvailable 0
+  ask partner-neighbors [
+    if is-active? self [
+      ;if t_age > 16 [
+        set tot tot + kMaxCare
+        set gAgents_sum gAgents_sum + max (list 0 t_care)
+		    set partnerTheoretical kMaxCare
+		    set partnerCareAvailable max (list 0 t_care)
+     ;]
+    ]
+  ]
+
+;  set t_ego-accounts replace-item kPartnerHoursLiving t_ego-accounts partnerTheoretical
+  set t_ego-accounts replace-item kPartnerAvailable t_ego-accounts partnerCareAvailable
+  
+; in-law children eventually contribute to theoretical care to ego
+  let myChildren getChildrenSet self kCheckInLaws kActive
+
+  ask myChildren [
+      ;if t_age > 16 [
+        set gAgents_sum gAgents_sum + max (list 0 t_care)
+        set tot tot + kMaxCare
+      ;]
+  ]
+
+  set t_ego-accounts replace-item kTotalAvailable t_ego-accounts gAgents_sum
+  set t_ego-accounts replace-item kTotalHoursLivings t_ego-accounts tot
+
+  if showInfo? and gCount_debug < 10 [
+    explore_showFamily agent kDebug
+    show (word who "totalCareAvailable " t_isEgo " " item  kTotalAvailable t_ego-accounts)
+    show "==========="
+  ]
+
+end
+
+to resetView [numFam]
+  let agentEgo getEgo turtles with [(t_idfamily = numFam) and t_isEgo]
+end
+
+to resetCareFamily [agentEgo debug]
+  if gDebug [pushDebugProc "resetCareFamily"]
+  set gAgents_set no-turtles
+  rcf agentEgo debug
+  if gDebug [popDebugProc]
+end
+
+to rcf [agent debug]
+  if not member? agent gAgents_set [
+    set gAgents_set (turtle-set agent gAgents_set)
+    
+    resetCare agent debug
+ 
+    ask partner-neighbors [
+      resetCare self debug
+    ]
+      
+    let myChildren getChildrenSet self kInLaws kActive
+    ask myChildren [
+      rcf self debug
+    ]
+  ]
+end
+
+to explore_netCare_Partners [agentEgo debug]
+; compute how much care is given to partners (children's partners and ego and her/his partner)
+
+  set gAgents_set no-turtles
+  e_n_p agentEgo debug
+end
+
+to e_n_p_int [agent debug]
+
+  let myChildren getChildrenSet self kNoInLaws kActive
+  ask myChildren [
+    e_n_p self debug
+  ]
+
+  let agentCareNeeded t_netCareDemand
+  let agentIsEgo t_isEgo
+  let agentNetCare t_netCareSupply
+  let partnerCareNeeded 0
+  let partnerIsEgo false
+  let partnerNetCare 0
+
+  ask partner-neighbors [
+    set partnerCareNeeded t_netCareDemand
+    set partnerIsEgo t_isEgo
+    set partnerNetCare t_netCareSupply
+  ]
+
+  if (agentCareNeeded > 0) and (partnerNetCare > 0) [
+    ; partner helps agent
+    ifelse partnerNetCare > agentCareNeeded [
+      set t_carebyPartner agentCareNeeded
+      ask partner-neighbors [
+        set t_netCareSupply t_netCareSupply - agentCareNeeded
+        if agentIsEgo [ set t_careGivenToEgo agentCareNeeded ]
+      ]
+      set t_netCareDemand 0
+    ][
+      set t_carebyPartner partnerNetCare
+      set t_netCareDemand t_netCareDemand - partnerNetCare
+      ask partner-neighbors [
+        if agentIsEgo [ set t_careGivenToEgo t_netCareSupply ]
+        set t_netCareSupply 0
+      ]
+    ]
+  ]
+
+  if (agentNetCare > 0) and (partnerCareNeeded > 0) [
+  ; agent helps partner
+    ifelse agentNetCare > partnerCareNeeded [
+      set t_netCareSupply t_netCareSupply - partnerCareNeeded
+      if partnerIsEgo [ set t_careGivenToEgo partnerCareNeeded ]
+      ask partner-neighbors [
+        set t_carebyPartner partnerCareNeeded
+        set t_netCareDemand 0
+      ]
+    ][
+      ask partner-neighbors [
+        set t_carebyPartner agentNetCare
+        set t_netCareDemand t_netCareDemand - agentNetCare
+      ]
+      if partnerIsEgo [ set t_careGivenToEgo t_netCareSupply ]
+      set t_netCareSupply 0
+    ]
+  ]
+
+end
+
+to e_n_p [agent debug]
+; compute t_netCareSupply looking at children only
+  if not member? agent gAgents_set [
+    set gAgents_set (turtle-set agent gAgents_set)
+
+    e_n_p_int agent debug
+  ]
+end
+
+to explore_netCare_Children [agentEgo debug]
+  set gAgents_set no-turtles
+  e_n_c agentEgo debug
+end
+
+
+to e_n_c [agent debug]
+; compute t_netCareSupply looking at children only
+   if not member? agent gAgents_set [
+    set gAgents_set (turtle-set agent gAgents_set)
+ 
+    let childrenTotalCareNeeded 0
+    let childrenTotalNetCare 0
+    let mainNetCare t_netCareSupply
+    let partnerNetCare 0
+
+    ask agent [
+      ask partner-neighbors [
+        set partnerNetCare t_netCareSupply
+      ]
+      
+      ; 1. CARE INSIDE THE GROUP OF SIBLINGS
+      ; look at siblings care needs
+      let myChildren getChildrenSet self kNoInLaws kActive
+      set t_childrenNeedCare false
+      ask myChildren [
+        ; children of children get priority
+        e_n_c self debug
+        ; partner of children get priority on siblings
+        e_n_p_int self debug
+        set childrenTotalCareNeeded childrenTotalCareNeeded + t_netCareDemand
+        if t_netCareSupply > 0 [
+          set childrenTotalNetCare childrenTotalNetCare + t_netCareSupply
+        ]
+      ]
+      if childrenTotalCareNeeded > 0 [
+        set t_childrenNeedCare true
+      ]
+      
+      ; sibling care for other ones
+      if (childrenTotalCareNeeded > 0) and (childrenTotalNetCare > 0) [
+        let temp childrenTotalNetCare
+        ; look at children who need care
+         ask myChildren [
+           if (t_netCareDemand > 0) and (temp > 0) [
+             ifelse temp > t_netCareDemand [
+               set t_carebyBrothers t_netCareDemand
+               set childrenTotalCareNeeded childrenTotalCareNeeded - t_netCareDemand
+               set temp temp - t_netCareDemand
+               set t_netCareDemand 0
+             ][
+               set t_carebyBrothers temp
+               set childrenTotalCareNeeded childrenTotalCareNeeded - temp
+               set t_netCareDemand t_netCareDemand - temp
+               set temp 0
+            ]
+          ]
+        ]
+        if temp < childrenTotalNetCare [
+          ; now update t_netCareSupply for brothers who are caring their own ones
+          let careGivenToBrothers childrenTotalNetCare - temp
+          ask myChildren [
+            if (t_netCareSupply > 0) and (careGivenToBrothers > 0) [
+              ifelse careGivenToBrothers > t_netCareSupply [
+                set careGivenToBrothers careGivenToBrothers - t_netCareSupply
+                set t_netCareSupply 0
+              ][
+                set t_netCareSupply t_netCareSupply - careGivenToBrothers
+                set careGivenToBrothers 0
+              ]
+            ]
+        ]
+        ]
+      ]
+  
+     ; 2. PARENTS CARE THEIR CHILDREN
+     if (childrenTotalCareNeeded > 0) and (mainNetCare + partnerNetCare > 0) [
+       ;  if debug [ print (word agent "cTC " childrenTotalCareNeeded " mNC " mainNetCare " pNC " partnerNetCare) ]
+        ask myChildren [
+          ; if debug [print (word self " netCareDemand " t_netCareDemand " careByParents " t_carebyParents)]
+          if (t_netCareDemand > 0) and (mainNetCare > 0) [
+            ifelse mainNetCare > t_netCareDemand [
+              set mainNetCare mainNetCare - t_netCareDemand
+              set t_carebyParents t_carebyParents + t_netCareDemand
+              set t_netCareDemand 0
+            ][
+             set t_carebyParents t_carebyParents + mainNetCare
+             set t_netCareDemand t_netCareDemand - mainNetCare
+             set mainNetCare 0
+            ]
+         ]
+         if (t_netCareDemand > 0) and (partnerNetCare > 0) [
+           ifelse partnerNetCare > t_netCareDemand [
+             set partnerNetCare partnerNetCare - t_netCareDemand
+             set t_carebyParents t_carebyParents + t_netCareDemand
+             set t_netCareDemand 0
+           ][
+            set t_carebyParents t_carebyParents + partnerNetCare
+            set t_netCareDemand t_netCareDemand - partnerNetCare
+            set partnerNetCare 0
+          ]
+        ]
+      ] ; ask myChildren
+; if debug [ print (word self " netCareSupply " t_netCareSupply " mainNetCare " mainNetCare) ]
+
+        set t_netCareSupply mainNetCare
+        ask partner-neighbors [
+          set t_netCareSupply partnerNetCare
+ ; if debug [ print (word self " netCareSupply " t_netCareSupply " partnerNetCare " partnerNetCare) ]
+        ]
+      ]
+    ]
+  ]
+end
+
+to explore_netCare_Parents [agentEgo debug]
+; now children give care to their parents (especially ego and her/his partner)
+
+  set gAgents_set no-turtles
+  e_n_par agentEgo debug
+end
+
+to-report careParentsAccounting [agent parentIsEgo listCareNeeded]
+  let agentCareNeeded item 0 listCareNeeded
+  let partnerCareNeeded item 1 listCareNeeded
+  
+  let propMain agentCareNeeded / (agentCareNeeded + partnerCareNeeded)
+  ifelse t_netCareSupply > (agentCareNeeded + partnerCareNeeded) [
+    set t_netCareSupply t_netCareSupply - (agentCareNeeded + partnerCareNeeded)
+    if parentIsEgo [
+      set t_careGivenToEgo agentCareNeeded
+      set t_careGivenToPartnerEgo partnerCareNeeded
+    ]
+    set agentCareNeeded 0
+    set partnerCareNeeded 0
+  ][
+    if parentIsEgo [
+      set t_careGivenToEgo propMain * t_netCareSupply
+      set t_careGivenToPartnerEgo ( 1 - propMain ) * t_netCareSupply
+    ]
+    set agentCareNeeded agentCareNeeded - propMain * t_netCareSupply
+    set partnerCareNeeded partnerCareNeeded - ( 1 - propMain ) * t_netCareSupply
+    set t_netCareSupply 0
+  ]
+  
+  report list agentCareNeeded partnerCareNeeded
+end
+
+to e_n_par [agent debug]
+  if not member? agent gAgents_set [
+    set gAgents_set (turtle-set agent gAgents_set)
+    
+    let agentCareNeeded t_netCareDemand
+    let parentIsEgo t_isEgo
+    let partnerCareNeeded 0
+    let listCareNeeded []
+    
+    ask partner-neighbors [
+      set partnerCareNeeded t_netCareDemand
+    ]
+
+    if agentCareNeeded + partnerCareNeeded = 0 [ stop ]
+        
+    let myChildren getChildrenSet self kCheckInLaws kActive
+    ask myChildren [
+      if (agentCareNeeded + partnerCareNeeded) = 0 [ stop ]
+      set listCareNeeded careParentsAccounting self parentIsEgo list agentCareNeeded partnerCareNeeded
+      set agentCareNeeded item 0 listCareNeeded
+      set partnerCareNeeded item 1 listCareNeeded
+
+      if (agentCareNeeded + partnerCareNeeded) = 0 [ stop ]
+;      ask partner-neighbors [
+;        set listCareNeeded careParentsAccounting self parentIsEgo list agentCareNeeded partnerCareNeeded
+;        set agentCareNeeded item 0 listCareNeeded
+;        set partnerCareNeeded item 1 listCareNeeded
+;      ]
+    ] ; ask myChildren
+    set t_carebyChildren t_carebyChildren + (t_netCareDemand - agentCareNeeded)
+    set t_netCareDemand agentCareNeeded
+    ask partner-neighbors [
+      set t_carebyChildren t_carebyChildren + (t_netCareDemand - partnerCareNeeded)
+      set t_netCareDemand partnerCareNeeded
+    ]
+    
+  ] ; if not member? agent gAgents_set
+end
+
+to checkCare [agentEgo debug]
+  set gAgents_set no-turtles
+  set gAgents_sum 0
+  ckc agentEgo debug
+  if abs(gAgents_sum) > 0.0001 [
+    output-print (word "Family " t_idfamily ": careGiven different from careReceived !! Diff: " gAgents_sum)
+  ]
+  set gAgents_set no-turtles
+  set gFamCareReceivedByEgo 0
+  set gFamCareGivenToEgo 0
+
+  checkEgoCare agentEgo debug
+  if abs(gFamCareReceivedByEgo - gFamCareGivenToEgo) > 0.0001 [
+    output-print (word "Family " t_idfamily ": care given to ego not equal care received by ego !!")
+  ]
+end
+
+to ckc [agent debug]
+  if not member? agent gAgents_set [
+    set gAgents_set (turtle-set agent gAgents_set)
+    ask partner-neighbors [
+      ckc self debug
+    ]
+    let myChildren getChildrenSet self kInLaws kActive
+    ask myChildren [
+      ckc self debug
+    ]
+
+    set t_careGivenToOtherRelatives 0
+    if t_care > 0 [
+      set t_careGivenToOtherRelatives t_care - t_netCareSupply - t_careGivenToEgo - t_careGivenToPartnerEgo
+    ]
+    
+    if t_netCareSupply < -0.0001 [
+      output-print (word "netCareSupply negative " t_idfamily)
+    ]
+    
+    if t_netCareDemand < -0.0001 [
+      output-print (word "netCareDemand negative " t_idfamily)
+    ]
+    
+    set t_carebyRelatives t_carebyChildren + t_carebyPartner + t_carebyParents + t_carebyBrothers
+    
+    set gAgents_sum gAgents_sum + t_careGivenToOtherRelatives + t_careGivenToEgo + t_careGivenToPartnerEgo - t_carebyRelatives
+  ]
+end
+
+to checkEgoCare [agent debug]
+  if not member? agent gAgents_set [
+    set gAgents_set (turtle-set agent gAgents_set)
+    if t_isEgo [
+      set gFamCareReceivedByEgo t_carebyPartner + t_carebyChildren
+    ]
+    ask partner-neighbors [
+      set gFamCareGivenToEgo t_careGivenToEgo
+    ]
+    let myChildren getChildrenSet self kInLaws kActive
+    ask myChildren [
+      set gFamCareGivenToEgo gFamCareGivenToEgo + t_careGivenToEgo
+    ]
+  ]
+end
+
+to-report careKind [agent debug lKind]
+  ;if t_age <= 16 [ report lKind ]
+
+  let totDep item 0 lKind
+  let totWork item 1 lKind
+  let totPartner item 2 lKind
+  let totOthers item 3 lKind
+  let effDep 0
+  let effWork 0
+  
+  ifelse t_care < 0 [
+    set effDep kMaxCare - t_care
+    set effDep min (list kMaxCare effDep)
+    set totDep totDep + effDep
+  ][
+    set effDep ( item 0 item t_activityRecoded item (ageLimited t_age) gCareArray ) - t_care
+    set effWork kMaxCare - ( item 0 item t_activityRecoded item (ageLimited t_age) gCareArray )
+    set totDep totDep + effDep
+    set totWork totWork + effWork
+    set totPartner totPartner + t_careGivenToPartnerEgo
+    set totOthers totOthers + t_careGivenToOtherRelatives
+  ]
+ ; if debug [ print (word who " " t_care " dep " t_dependency " act " t_activityRecoded " effDep " effDep " effWork " effWork " careGivenPartner " t_careGivenToPartnerEgo " careToOthers " t_careGivenToOtherRelatives) ]
+  
+  report ( list totDep totWork totPartner totOthers )
+end
+
+to egoCareKind [agentEgo debug]
+  
+  let totDep 0
+  let totWork 0
+  let totPartner 0
+  let totOthers 0
+  let lKind (list totDep totWork totPartner totOthers)
+  
+  ask partner-neighbors [
+    if is-active? self [
+      set lKind careKind self debug lKind
+;  if debug [print (word "ego-totalDependency " item 0 lKind " ego-totalWork " item 1 lKind " ego-totalPartner " item 2 lKind " ego-totalOthers " item 3 lKind)]
+    ]
+  ]
+  set t_ego-accounts replace-item kPartnerDependency t_ego-accounts item 0 lKind
+  set t_ego-accounts replace-item kPartnerWork t_ego-accounts item 1 lKind
+  set t_ego-accounts replace-item kPartnerOthers t_ego-accounts (item 2 lKind + item 3 lKind)
+  
+  let myChildren getChildrenSet self kCheckInLaws kActive
+
+  ask myChildren [
+    if is-active? self [
+      set lKind careKind self debug lKind
+
+ ; if debug [print (word "ego-totalDependency " item 0 lKind " ego-totalWork " item 1 lKind " ego-totalPartner " item 2 lKind " ego-totalOthers " item 3 lKind)]
+    ]
+  ]
+  set t_ego-accounts replace-item kTotalDependency t_ego-accounts item 0 lKind
+  set t_ego-accounts replace-item kTotalWork t_ego-accounts item 1 lKind
+  set t_ego-accounts replace-item kTotalPartner t_ego-accounts item 2 lKind
+  set t_ego-accounts replace-item kTotalOthers t_ego-accounts item 3 lKind
+  
+ ; if debug [print (word who " " t_care " dep " t_dependency " act " t_activityRecoded " ego-totalDependency " item  kTotalDependency t_ego-accounts " ego-totalWork " item kTotalWork t_ego-accounts " ego-totalPartner " item kTotalPartner t_ego-accounts " ego-totalOthers " item kTotalOthers t_ego-accounts)]
+
+end
+
+to egoAccountsActualize [agentEgo debug]
+  if t_hasPartnerEgo [
+  	set t_ego-accounts replace-item kPartner_nupt t_ego-accounts kMaxCare
+  	if t_maritalStatus = kMarried [
+  	  set t_ego-accounts replace-item kPartnerHoursLiving t_ego-accounts kMaxCare
+  	]
+  ]
+  if t_maritalStatus = kWidowed [set t_ego-accounts replace-item kNoPartner_mort t_ego-accounts kMaxCare]
+  set t_ego-accounts replace-item kNoPartner_div t_ego-accounts 0
+  set t_ego-accounts replace-item kChildren_fert t_ego-accounts ( t_nChildren * kMaxCare )
+  set t_ego-accounts replace-item kNoChildren_mort t_ego-accounts  ( (t_nChildren - t_nActiveChildren + t_nFutureActiveChildren) * kMaxCare )
+  set t_ego-accounts replace-item kWork_partner t_ego-accounts ( item kPartnerWork t_ego-accounts )
+  set t_ego-accounts replace-item kWork_children t_ego-accounts ( item kTotalWork t_ego-accounts - item kPartnerWork t_ego-accounts )
+  set t_ego-accounts replace-item kDependency_partner t_ego-accounts item kPartnerDependency t_ego-accounts
+  set t_ego-accounts replace-item kDependency_children t_ego-accounts (item kTotalDependency t_ego-accounts - item kPartnerDependency t_ego-accounts)
+
+  ; kCompetition_partner
+  let myCare 0
+  let myChildren getChildrenSet self kCheckInLaws kActive
+  ask myChildren [
+    set myCare myCare + t_careGivenToPartnerEgo
+  ]
+  set t_ego-accounts replace-item kCompetition_partner t_ego-accounts myCare
+  
+  ; kCompetition_children
+  set myCare 0
+  set myChildren getChildrenSet self kCheckInLaws kActive
+  ask myChildren [
+      set myCare myCare + t_carebyPartner
+      set myCare myCare + t_carebyBrothers
+    ]
+  set t_ego-accounts replace-item kCompetition_children t_ego-accounts myCare
+  
+  ; kCompetition_family
+  set myCare 0
+  set myChildren getChildrenSet self kCheckInLaws kActive
+  ask myChildren [
+      set myCare myCare + t_careGivenToOtherRelatives
+    ]
+  set t_ego-accounts replace-item kCompetition_children_family t_ego-accounts myCare
+  
+  set t_ego-accounts replace-item kTotalHours t_ego-accounts (item kPartner_nupt t_ego-accounts + t_nChildren * kMaxCare)
+  if CareFromChildrenInLaw? [ set t_ego-accounts replace-item kTotalHours t_ego-accounts ( item kTotalHours t_ego-accounts + t_nInLaws * kMaxCare ) ]
+  set t_ego-accounts replace-item kPartnerHours t_ego-accounts item kPartner_nupt t_ego-accounts
+
+  set t_ego-accounts replace-item kDeficit t_ego-accounts ( t_careDemand - item kTotalHoursLivings t_ego-accounts )
+  set t_ego-accounts replace-item kDeficit t_ego-accounts max (list 0 item kDeficit t_ego-accounts)
+
+end
+
+to egoAccountsActualize2 [agentEgo]
+  if t_hasPartnerEgo [
+  	set t_ego-accounts replace-item kPartner_nupt t_ego-accounts kMaxCare
+  	if t_maritalStatus = kMarried [
+  	  set t_ego-accounts replace-item kPartnerHoursLiving t_ego-accounts kMaxCare
+  	]
+  ]
+  if t_maritalStatus = kWidowed [set t_ego-accounts replace-item kNoPartner_mort t_ego-accounts kMaxCare]
+  set t_ego-accounts replace-item kNoPartner_div t_ego-accounts 0
+  set t_ego-accounts replace-item kChildren_fert t_ego-accounts ( t_nChildren * kMaxCare )
+  set t_ego-accounts replace-item kNoChildren_mort t_ego-accounts  ( (t_nChildren - t_nActiveChildren + t_nFutureActiveChildren) * kMaxCare )
+
+  ; FIX (2026-08-07): kPartnerWork/kPartnerDependency/kTotalWork/kTotalDependency used to be
+  ; read here straight from t_ego-accounts (i.e. from egoCareKind's output) -- but egoCareKind
+  ; only runs "if not care2Only?", so under care2Only? = TRUE these were always reading back
+  ; this tick's zeroed-out resetCare values: silently 0 for every ego, every tick.
+  ; egoCare2Kind is the care2 equivalent and DOES always run, so we read its
+  ; kDependency2_*/kWork2_* outputs instead. As under care1, "dependency" here means the
+  ; health-related share, not the "too young to help" share: kDependency2_partner (a partner
+  ; has no separate "too young" case) and kDependency2_age_children + kDependency2_health_children
+  ; (children's youth-related and health-related shares combined) are the matching care2 sources.
+  set t_ego-accounts replace-item kPartnerDependency t_ego-accounts item kDependency2_partner t_ego-accounts
+  set t_ego-accounts replace-item kPartnerWork t_ego-accounts item kWork2_partner t_ego-accounts
+  set t_ego-accounts replace-item kTotalDependency t_ego-accounts ( item kDependency2_partner t_ego-accounts + item kDependency2_age_children t_ego-accounts + item kDependency2_health_children t_ego-accounts )
+  set t_ego-accounts replace-item kTotalWork t_ego-accounts ( item kWork2_partner t_ego-accounts + item kWork2_children t_ego-accounts )
+
+  set t_ego-accounts replace-item kWork_partner t_ego-accounts ( item kWork2_partner t_ego-accounts )
+  set t_ego-accounts replace-item kWork_children t_ego-accounts ( item kWork2_children t_ego-accounts )
+
+  set t_ego-accounts replace-item kDependency_partner t_ego-accounts item kDependency2_partner t_ego-accounts
+  set t_ego-accounts replace-item kDependency_children t_ego-accounts ( item kDependency2_age_children t_ego-accounts + item kDependency2_health_children t_ego-accounts )
+
+  ; NOT fixed here: kTotalPartner / kPartnerOthers / kTotalOthers still come out as 0 under
+  ; care2Only? = TRUE. Their care1 source (careKind's totPartner/totOthers) depends on
+  ; t_careGivenToPartnerEgo and t_careGivenToOtherRelatives, which are themselves only ever set
+  ; by the care1 cascade (explore_netCare_Parents / checkCare) and never touched under
+  ; care2Only?. care2Kind computes an equivalent "totOthers" internally, but egoCare2Kind never
+  ; stores it anywhere -- so there is no care2-sourced value to read yet. Flagging rather than
+  ; guessing at a replacement: this would need a small addition to egoCare2Kind, not just a
+  ; different variable to read.
+
+  ; kCompetition_partner
+  set t_ego-accounts replace-item kCompetition_partner t_ego-accounts item kCare2ChildToEgoP t_care2CompCount
+  
+  ; kCompetition_children
+  set t_ego-accounts replace-item kCompetition_children t_ego-accounts ( item kCare2EgoPToChild t_care2CompCount + item kCare2ChildToSibling t_care2CompCount )
+  
+  ; kCompetition_family
+  set t_ego-accounts replace-item kCompetition_children_family t_ego-accounts ( item kCare2ChildToPartner t_care2CompCount + item kCare2ChildToGrandChild t_care2CompCount )
+  
+  set t_ego-accounts replace-item kTotalHours t_ego-accounts (item kPartner_nupt t_ego-accounts + t_nChildren * kMaxCare)
+  if CareFromChildrenInLaw? [ set t_ego-accounts replace-item kTotalHours t_ego-accounts ( item kTotalHours t_ego-accounts + t_nInLaws * kMaxCare ) ]
+  set t_ego-accounts replace-item kPartnerHours t_ego-accounts item kPartner_nupt t_ego-accounts
+
+  set t_ego-accounts replace-item kDeficit t_ego-accounts ( t_care2Demand - item kTotalHoursLivings t_ego-accounts )
+  set t_ego-accounts replace-item kDeficit t_ego-accounts max (list 0 item kDeficit t_ego-accounts)
+
+end
+
+to-report care2ToCount [aListCare2 aRel]
+  ; returns TOTAL care given of type aRel (as stored in aListCare2)
+  ;
+  ; BUG FIX (2026-08-16): this used to be
+  ;   foreach aListCare2 [ eltList -> if item 1 eltList = aRel [ report item 2 eltList ] ]
+  ;   report 0
+  ; -- a `report` inside `foreach` exits the procedure on the FIRST matching
+  ; entry instead of accumulating, so whenever an agent's t_care2To_list had
+  ; more than one entry of the same kind (e.g. a child giving to several
+  ; single siblings via care2Siblings, or to several of their own kids via
+  ; care2CoupleChildren, or ego's partner giving to several of ego's
+  ; children), every entry after the first was silently dropped. This
+  ; understated kChildToSibling/kChildToGrandChild/kEgoPartnerToChild
+  ; counts, which feed kCompetition_children/kCompetition_children_family
+  ; in egoAccountsActualize2 -- found while diagnosing why NetLogo's
+  ; Care2ByChildren ran higher than the R port's. Fixed to sum all matches.
+  let total 0
+  foreach aListCare2 [
+    eltList ->
+    if item 1 eltList = aRel [ set total total + item 2 eltList ]
+  ]
+  report total
+end
+
+to addCare2Comp [agent agentEgo]
+  ; 1. ego's partner to children
+  ; 2. children to ego's partner
+  ; 3. children to her/his partner
+  ; 4. children to her/his siblings
+  ; 5. children to grand children
+  ; 6. ego from ego's partner
+  ; 7. ego from children
+  ; add "competition-care" data for current agent to ego
+  let aList []
+  ask agent [
+    set aList (list 
+        care2ToCount t_care2To_list kEgoPartnerToChild
+        care2ToCount t_care2To_list kChildToEgoPartner
+        care2ToCount t_care2To_list kChildToPartner
+        care2ToCount t_care2To_list kChildToSibling
+        care2ToCount t_care2To_list kChildToGrandChild
+        care2ToCount t_care2To_list kEgoPartnerToEgo
+        care2ToCount t_care2To_list kChildToEgo
+      )
+    set t_care2CompCount aList
+  ]
+
+  ask agentEgo [
+    set t_care2CompCount ( sumList t_care2CompCount aList )
+  ]
+end
+
+to cumulCompCare2 [agentEgo]
+  ; all "competition" data are aggregated at the ego level
+  ask agentEgo [
+    set t_care2CompCount (list 0 0 0 0 0 0 0)
+    
+    ask partner-neighbors [
+      addCare2Comp self agentEgo
+    ]
+    
+    let myChildren getChildrenSet self kNoInLaws kActive
+    ask myChildren [
+      addCare2Comp self agentEgo
+    ] ; ask myChildren
+    
+  ] ; ask agentEgo
+end
+
+to egoCare2Kind [agentEgo debug]
+  
+  let totDep 0
+  let totDepHealth 0
+  let totWork 0
+  let totOthers 0
+  let lKind (list totDep totDepHealth totWork totOthers)
+  
+  ask partner-neighbors [
+    if is-active? self [
+      set lKind care2Kind self debug lKind
+;  if debug [print (word "ego-totalDependency " item 0 lKind " ego-totalWork " item 1 lKind " ego-totalPartner " item 2 lKind " ego-totalOthers " item 3 lKind)]
+    ]
+  ]
+  set t_ego-accounts replace-item kDependency2_partner t_ego-accounts item 1 lKind
+  set t_ego-accounts replace-item kWork2_partner t_ego-accounts item 2 lKind
+  ;set t_ego-accounts replace-item xxxx t_ego-accounts item 3 lKind
+  
+  let myChildren getChildrenSet self kCheckInLaws kActive
+
+  set lKind (list totDep totDepHealth totWork totOthers)
+  
+  ask myChildren [
+    if is-active? self [
+      set lKind care2Kind self debug lKind
+
+ ; if debug [print (word "ego-totalDependency " item 0 lKind " ego-totalWork " item 1 lKind " ego-totalPartner " item 2 lKind " ego-totalOthers " item 3 lKind)]
+    ]
+  ]
+  set t_ego-accounts replace-item kDependency2_age_children t_ego-accounts item 0 lKind
+  set t_ego-accounts replace-item kDependency2_health_children t_ego-accounts item 1 lKind
+  set t_ego-accounts replace-item kWork2_children t_ego-accounts item 2 lKind
+  ;set t_ego-accounts replace-item xxxx t_ego-accounts item 3 lKind
+  
+ ; if debug [print (word who " " t_care " dep " t_dependency " act " t_activityRecoded " ego-totalDependency " item  kTotalDependency t_ego-accounts " ego-totalWork " item kTotalWork t_ego-accounts " ego-totalPartner " item kTotalPartner t_ego-accounts " ego-totalOthers " item kTotalOthers t_ego-accounts)]
+
+end
+
+to-report care2Kind [agent debug lKind]
+
+  let totDep item 0 lKind
+  let totDepHealth item 1 lKind
+  let totWork item 2 lKind
+  let totOthers item 3 lKind
+  
+  ask agent [
+    ; t_cr_rel_notEgo                 ; number of hours of care lost for caring other relatives
+    set totDep totDep + t_cr_young
+    set totDepHealth totDepHealth + t_cr_dep
+    set totWork totWork + t_cr_work
+    set totOthers totOthers + t_careGivenToOtherRelatives + t_careGivenToPartnerEgo
+  ] 
+  
+  report ( list totDep totDepHealth totWork totOthers )
+end
+
+to resetCare2 [agent]
+  
+  ask agent [
+    set t_care2Supply 0
+    set t_care2Demand 0
+    
+    if (t_care2 > 0) [ set t_care2Supply t_care2 ]
+    if (t_care2 < 0) [ set t_care2Demand (- t_care2) ]
+      
+    set t_care2From_list []
+    set t_care2To_list []
+    set t_care2CompCount []
+    
+  ]
+ end
+
+to care2Update [agentEgo debug]
+  
+  ask agentEgo [
+    let myChildren getChildrenSet self kNoInLaws kActive
+    
+    ask myChildren [
+      ; Explore grand children care demand and supply from partner and siblings
+      let myGrandChildren getChildrenSet self kNoInLaws kActive
+      ask myGrandChildren [
+        ; ego's grandchildren and his/her partner care for each other
+        care2Couple self
+        ; ego's grandchildren care for their siblings (only siblings who are single help each other)
+        care2Siblings self myGrandChildren
+      ]
+      
+      ; couple cares for their children (here ego's grandchildren)
+      care2CoupleChildren self myGrandChildren
+  
+      ; ego's children and his/her partner care for each other
+      care2Couple self
+      
+      ; ego's children care for their siblings (only siblings who are single help each other)
+      care2Siblings self myChildren
+      
+      ; ego's grandchildren care for ego's children and his/her partner (each grandchidren giving a proportional amount of care if both parents are needy)
+      care2Parents self myGrandChildren
+          
+    ] ; ask myChildren
+  
+    ; ego and his/her partner care for their children
+    care2CoupleChildren self myChildren
+      
+    ; ego and ego's partner care for each other
+    care2Couple self
+  
+    ; ego's children care for ego and his/her partner (each chidren giving a proportional amount of care if both parents are needy)
+    care2Parents self myChildren
+  ] ; ask agentEgo
+  
+  cumulCompCare2 agentEgo
+end
+
+to care2CoupleChildren [agent myChildren]
+  ; parents care for their children. We adjust the order on the fly in order to be symmetric
+
+  let agentPartner no-turtles
+  ask agent [
+     ask partner-neighbors [
+       if is-active? self [
+         set agentPartner self
+       ]
+     ]
+  ]
+  
+  let dice random-float 1
+  ask myChildren [
+    ifelse dice < 0.5 [
+      care2firstCareSecond agent self 1
+      care2firstCareSecond agentPartner self 1
+    ][
+      care2firstCareSecond agentPartner self 1
+      care2firstCareSecond agent self 1
+    ]
+  ]
+end
+
+; OBSOLETE
+to care2CoupleChildrenOld [agent myChildren]
+  ; parents care for their children. We adjust the order on the fly in order to be symmetric
+  
+  let dice random-float 1
+  
+  ask agent [
+    ; we lower the probability having the child 
+   ifelse dice < 0.3 [
+      ; agent care for his children
+      care2Children self myChildren
+      ; agent's partner cares for his/her children
+      ask partner-neighbors [
+        if is-active? self [
+          care2Children self myChildren
+        ]
+      ]
+    ][
+      ; agent's partner cares for his/her children
+      ask partner-neighbors [
+        if is-active? self [
+          care2Children self myChildren
+        ]
+      ]
+      ; agent care for his children
+      care2Children self myChildren
+    ]
+  ]
+end
+
+
+to-report care2FromToAgentKind [agentFrom agentTo]
+; return the kind of care given
+  let rel -1
+  ask agentFrom [
+    let myRelativeKinType 0
+    ask agentTo [
+      set myRelativeKinType t_kinTypeRelEgo
+    ]
+    if t_kinTypeRelEgo = kEgo [
+      ; ego gives to a relative
+      if myRelativeKinType = kEgo [ print (word "error: ego gives to her/himself: " myRelativeKinType) ]
+      if myRelativeKinType = kEgoPartner [ set rel kEgoToPartner ]
+      if myRelativeKinType = kEgoChild [ set rel kEgoToChild ]
+      if myRelativeKinType > kEgoChild [ print (word "error: ego gives to incorrect relative: " myRelativeKinType) ]
+    ]
+    if t_kinTypeRelEgo = kEgoPartner [
+      ; ego's partner gives to a relative
+      if myRelativeKinType = kEgo [ set rel kEgoPartnertoEgo ]
+      if myRelativeKinType = kEgoPartner [ print (word "error: ego's partner gives to her/himself: " myRelativeKinType) ]
+      if myRelativeKinType = kEgoChild [ set rel kEgoPartnerToChild ]
+      if myRelativeKinType > kEgoChild [ print (word "error: ego's partner gives to incorrect relative: " myRelativeKinType) ]
+    ]
+    if t_kinTypeRelEgo = kEgoChild [
+      ; ego's child gives to a relative
+      if myRelativeKinType = kEgo [ set rel kChildToEgo ]
+      if myRelativeKinType = kEgoPartner [ set rel kChildToEgoPartner ]
+      if myRelativeKinType = kEgoChild [ set rel kChildToSibling ]
+      if myRelativeKinType = kEgoChildInLaw [ set rel kChildToPartner ]
+      if myRelativeKinType = kEgoGrandChild [ set rel kChildToGrandChild ]
+      if myRelativeKinType > kEgoGrandChild [ print (word "error: ego's child gives to incorrect relative: " myRelativeKinType) ]
+    ]
+    if t_kinTypeRelEgo = kEgoChildInLaw [
+      ; ego's child-in-law gives to a relative
+      if myRelativeKinType = kEgo [ print (word "error: ego's child-in-law gives to incorrect relative: " myRelativeKinType) ]
+      if myRelativeKinType = kEgoPartner [ print (word "error: ego's child-in-law gives to incorrect relative: " myRelativeKinType) ]
+      if myRelativeKinType = kEgoChild [ set rel kChildInLawToChild ]
+      if myRelativeKinType = kEgoChildInLaw [ print (word "error: ego's child-in-law gives to incorrect relative: " myRelativeKinType) ]
+      if myRelativeKinType = kEgoGrandChild [ set rel kChildInLawToGrandChild ]
+      if myRelativeKinType > kEgoGrandChild [ print (word "error: ego's child-in-law gives to incorrect relative: " myRelativeKinType) ]
+    ]
+    if t_kinTypeRelEgo = kEgoGrandChild [
+      ; ego's child-in-law gives to a relative
+      if myRelativeKinType = kEgo [ print (word "error: ego's grand child gives to incorrect relative: " myRelativeKinType) ]
+      if myRelativeKinType = kEgoPartner [ print (word "error: ego's grand child gives to incorrect relative: " myRelativeKinType) ]
+      if myRelativeKinType = kEgoChild [ set rel kGrandChildToChild ]
+      if myRelativeKinType = kEgoChildInLaw [ set rel kGrandChildToChildInLaw ]
+      if myRelativeKinType = kEgoGrandChild [ set rel kGrandChildToSibling ]
+      if myRelativeKinType > kGrandChildToSibling [ print (word "error: ego's grand child gives to incorrect relative: " myRelativeKinType) ]
+    ]
+
+  ] ; ask agentFrom
+  
+  if rel < 0 [print (word "something went wrong with care2FromToAgentKind, agentFrom: " agentFrom " agentTo:" agentTo) ]
+  report rel
+end
+
+to care2Couple [agent]
+  if not is-active? agent [stop]
+	ask agent [
+		let myRelativeId no-turtles
+		ask partner-neighbors [
+			set myRelativeId self
+		]
+		care2firstCareSecond self myRelativeId 1
+		care2firstCareSecond myRelativeId self 1
+	]
+end
+
+to-report isSingle [agent]
+  let res TRUE
+  ask agent [
+    ask partner-neighbors [
+      if is-active? self [set res FALSE]
+		]
+  ]
+  report res
+end
+
+to care2Siblings [agent mySiblings]
+  if not is-active? agent [stop]
+  if not isSingle agent [stop]
+  ask mySiblings [
+    if (self != agent) [
+      if (isSingle self) [
+     		care2firstCareSecond self agent 1
+    		care2firstCareSecond agent self 1
+      ]
+    ]
+  ]
+end
+
+to care2Parents [agentParent myChildren]
+
+  ask agentParent [
+    let demandParent1 t_care2Demand
+    let demandParent2 0
+    let agentPartner no-turtles
+    ask partner-neighbors [
+      if is-active? self [
+        set demandParent2 t_care2Demand
+        set agentPartner self
+      ]
+		]
+    ask myChildren [
+      if ( demandParent1 + demandParent2 ) > 0 [
+        care2firstCareSecond self agentParent (demandParent1 / (demandParent1 + demandParent2))
+        care2firstCareSecond self agentPartner 1
+        ask agentParent [
+          set demandParent1 t_care2Demand
+        ]
+        ask agentPartner [
+          set demandParent2 t_care2Demand
+        ]
+      ]
+    ]
+  ]
+end
+
+; OBSOLETE
+to care2Children [agentParent myChildren]
+  ask agentParent [
+    if t_care2Supply > 0 [
+      ask myChildren [
+        care2firstCareSecond agentParent self 1
+      ]
+    ]
+  ]
+end
+
+to care2firstCareSecond [agent relative proportion]
+  ; proportion is used when having to provide care for both dependent parents
+  if not is-active? agent [stop]
+  if not is-active? relative [stop]
+
+  if gDebug [
+    let care2from 0
+    let care2SupFrom 0
+    let care2DemFrom 0
+    let care2to 0
+    let care2SupTo 0
+    let care2DemTo 0
+    ask agent [
+      set care2from t_care2
+      set care2SupFrom t_care2Supply
+      set care2DemFrom t_care2Demand
+    ] 
+    ask relative [
+      set care2to t_care2
+      set care2SupTo t_care2Supply
+      set care2DemTo t_care2Demand
+    ]
+    if gDebug [ print (word "care2firstCareSecond "
+      (kinString agent) " " agent " " care2from " (" care2SupFrom "-" care2DemFrom ") "
+      (kinString relative) " " relative " " care2to " (" care2SupTo "-" care2DemTo ") "
+    ) ]
+    ]
+
+  let careFromToKind (care2FromToAgentKind agent relative)
+  
+  ask agent [
+    let who_agent who
+    let who_relative 0
+    if t_care2Supply > 0 [
+      if gDebug [ print (word "agent gives from " t_care2Supply) ]
+		; current agent can give care time to her/his relative in case of need
+      let mySupply ( t_care2Supply * proportion )
+      let myRelativeReceives 0
+      ask relative [
+        set who_relative who
+        if gDebug [ print (word t_care2 " " t_care2Demand) ]
+		    if t_care2Demand > 0 [
+          if gDebug [ print "relative receives" ]
+			  ; the relative needs care
+          set myRelativeReceives min (list mySupply t_care2Demand)
+          if gDebug [ print (word "cs " mySupply " cd " t_care2Demand " given " myRelativeReceives " type " careFromToKind)]
+  			  set t_care2Demand t_care2Demand - myRelativeReceives
+          			  set t_care2From_list sentence t_care2From_list (list (list who_agent careFromToKind myRelativeReceives))
+		    ]
+		  ]
+		  if myRelativeReceives > 0 [
+		    set t_care2Supply t_care2Supply - myRelativeReceives
+		    ; again we keep track of from who and how much care the agent receives, here from her/his partner
+        		    set t_care2To_list sentence t_care2To_list (list (list who_relative careFromToKind myRelativeReceives))
+        
+        if gDebug [ print (word agent " helps " relative) ]
+
+		  ]
+	  ]
+	]
+end

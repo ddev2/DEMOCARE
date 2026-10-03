@@ -1,0 +1,80 @@
+to-report ImportDependencyTransitions [file]
+  file-close-all
+  file-open file
+  let header file-read-line
+  let counter 1
+  let separator ifelse-value (member? "," header) [","][";"]
+  let dependencyTransitionsTable []
+  foreach n-values (length header) [ i -> i ] [
+    i ->
+    if item i header = separator [
+      set counter counter + 1
+    ]
+  ]
+  
+  ;; Get transitions table 
+  while [not file-at-end?] [
+    let allFields []
+    let tvar file-read-line
+    foreach n-values counter [ ?1 -> ?1 ] [
+      let cut ifelse-value (position separator tvar != false) [(position separator tvar)] [length tvar]
+      let field substring tvar 0 cut
+      carefully [
+        if is-number? read-from-string field [
+          set field read-from-string field
+        ]
+      ] [
+      ]
+      set allFields lput field allFields
+      if (position separator tvar != false) [
+        set tvar substring tvar ((position separator tvar) + 1) length tvar
+      ]
+    ]
+    set dependencyTransitionsTable lput allFields dependencyTransitionsTable
+  ]
+  file-close-all
+  
+  ;; Transform transitions probabilities table into multidimensional array
+  let dependencyLevels sort remove-duplicates map [ i -> item 4 i ] dependencyTransitionsTable
+  let ageLevels sort remove-duplicates map [ i -> item 3 i ] dependencyTransitionsTable
+  let statusLevels sort remove-duplicates map [ i -> item 0 i ] dependencyTransitionsTable
+  let sexLevels sort remove-duplicates map [ i -> item 1 i ] dependencyTransitionsTable
+  
+  ;print (word "DEP: " dependencyLevels)
+  ;print (word "AGE: " ageLevels)
+  ;print (word "STATUS: " statusLevels)
+  ;print (word "SEX: " sexLevels)
+  
+  let dependencyTransitionArray []
+  foreach dependencyLevels [
+    dependencyLevel ->
+    let fLevelTable filter [ row -> item 4 row = dependencyLevel ] dependencyTransitionsTable
+    let ageArray []
+    
+    foreach ageLevels [
+      ageLevel ->
+      let fAgeTable filter [ row -> item 3 row = ageLevel ] fLevelTable
+      let statusArray []
+      
+      foreach statusLevels [
+        statusLevel ->
+        let fStatusTable filter [ row -> item 0 row = statusLevel ] fAgeTable
+        let sexArray []
+        
+        foreach sexLevels [
+          sexLevel ->
+          let fSexTable filter [ row -> item 1 row = sexLevel ] fStatusTable
+          
+          if not empty? fSexTable [
+            let referenceValue item 5 item 0 fSexTable
+            set sexArray lput referenceValue sexArray
+          ]
+        ]
+        set statusArray lput sexArray statusArray
+      ]
+      set ageArray lput statusArray ageArray
+    ]
+    set dependencyTransitionArray lput ageArray dependencyTransitionArray
+  ]
+  report dependencyTransitionArray
+end

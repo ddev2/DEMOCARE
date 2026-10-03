@@ -1,0 +1,20 @@
+to UpdateActivity
+  let refValueChangeH item 1 item 1 item t_activityRecoded item t_genderRecoded item t_statusRecoded item t_age item t_dependency gActivityTransitionsArray
+  ;let valueChangeH item 0 item 1 item t_activityRecoded item t_genderRecoded item t_statusRecoded item t_age item t_dependency gActivityTransitionsArray
+  let refValueChangeL item 1 item 0 item t_activityRecoded item t_genderRecoded item t_statusRecoded item t_age item t_dependency gActivityTransitionsArray
+  ;let valueChangeL item 0 item 0 item t_activityRecoded item t_genderRecoded item t_statusRecoded item t_age item t_dependency gActivityTransitionsArray
+  let dice random-float 1
+  
+  if (dice < refValueChangeH) [
+    ifelse (dice < refValueChangeL) [
+      set t_activity item 0 item 0 item t_activityRecoded item t_genderRecoded item t_statusRecoded item t_age item t_dependency gActivityTransitionsArray
+      ;print (word "Case: " c "- New activity: " ValueChangeL "(" dice " is lower than " refValueChangeL ")")
+    ] [
+      set t_activity item 0 item 1 item t_activityRecoded item t_genderRecoded item t_statusRecoded item t_age item t_dependency gActivityTransitionsArray
+      ;print (word "Case :" c "- New activity: " ValueChangeH "(" dice " is lower than " refValueChangeH ")")
+    ]
+    set t_activityRecoded ifelse-value (t_activity = "A") [0][ifelse-value (t_activity = "C") [1][2]]
+    ;if showInfo? [show (word "Activity updated to " t_activity)]
+    UpdateCare
+  ]
+end

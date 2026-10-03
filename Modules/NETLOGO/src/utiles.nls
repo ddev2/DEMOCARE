@@ -1,0 +1,719 @@
+to resetTimer
+  set gTimer 0
+  reset-timer
+end
+
+to showTimer
+  set gTimer timer
+  print (word "Total time: " gTimer)
+end
+
+to showVar [agent]
+  ask agent [
+    print "who sex age st act dep ego mSt care careS careD nCareS nCareD careEgo carePEgo careOth cByP cByCh cBPar cBBro cBRel"
+    print (word t_gender t_age t_status t_dependency t_maritalStatus t_care t_careSupply t_careDemand t_netCareSupply t_netCareDemand t_careGivenToEgo t_careGivenToPartnerEgo t_careGivenToOtherRelatives t_carebyPartner t_carebyChildren t_carebyParents t_carebyBrothers t_carebyRelatives)
+  ]
+end
+
+to showCompCare [agentEgo]
+  ask agentEgo [
+  if not t_isEgo [user-message "not ego"]
+  computeCare agentEgo false
+  print "ego-partnerTheoretical ego-partnerCareAvailable ego-partnerDependency ego-partnerWork ego-partnerOthers"
+  print (word item kPartnerHoursLiving t_ego-accounts " " item kPartnerAvailable t_ego-accounts " " item kPartnerDependency t_ego-accounts " " item kPartnerWork t_ego-accounts " " item kPartnerOthers t_ego-accounts)
+  ]
+end
+
+to-report ageLimited [ageAgent]
+  ifelse ageAgent > 105 [
+    report 105
+  ][
+    report ageAgent
+  ]
+end
+
+to-report interLists [l1 l2]
+  report filter [i -> member? i l1] l2
+end
+
+to-report getEgo [agentEgo]
+  if is-agentset? agentEgo [ set agentEgo one-of agentEgo with [t_isEgo] ]
+  report agentEgo
+end
+
+to-report countPartner [agent checkActive]
+  let agentSet no-turtles
+
+  ask partner-neighbors [
+	  ifelse checkActive = kActive [
+      if is-active? self [ set agentSet (turtle-set self agentSet) ]
+    ][
+      ifelse checkActive = kActiveInTheFuture [
+        if tickIn > ticks [
+          set agentSet (turtle-set self agentSet)
+        ]
+      ][
+        set agentSet (turtle-set self agentSet)
+      ]
+    ]
+  ]
+  
+  report agentSet
+end
+
+to-report getChildrenSet [agent inLaws checkActive]
+
+  let agentSet no-turtles
+
+  ask t_childrenSet [
+	  ifelse checkActive = kActive [
+      if is-active? self [ set agentSet (turtle-set self agentSet) ]
+    ][
+      ifelse checkActive = kActiveInTheFuture [
+        if tickIn > ticks [
+          set agentSet (turtle-set self agentSet)
+        ]
+      ][
+        set agentSet (turtle-set self agentSet)
+      ]
+    ]
+  ]
+  
+  if (inLaws = kInLaws) or (inLaws = kOnlyInLaws) [
+    let agentSetInLaws no-turtles
+    ask t_childrenSet [
+      ask partner-neighbors [
+          ifelse checkActive = kActive [
+            if is-active? self [ set agentSetInLaws (turtle-set self agentSetInLaws) ]
+          ][
+          	ifelse checkActive = kActiveInTheFuture [
+          	  if tickIn > ticks [
+                set agentSetInLaws (turtle-set self agentSetInLaws)
+          	  ]
+          	][
+              set agentSetInLaws (turtle-set self agentSetInLaws)
+          	]
+          ]
+      ]
+    ]
+    ifelse inLaws = kInLaws [
+      report (turtle-set agentSet agentSetInLaws)
+    ][
+      report agentSetInLaws
+    ]
+  ]
+  report agentSet
+end
+
+to initAgent [agent]
+  ; newly created agent
+  
+  let id 0
+  ask agent [
+    set id t_idfamily
+  ]
+
+  let myEgo actives with [t_idfamily = id and t_isEgo]
+  
+  initFamily myEgo
+end
+
+to initFamily [agentEgo]
+  ask agentEgo [
+    ask partner-neighbors [
+      set t_isPartner true
+      if t_kinTypeRelEgo < 0 [print (word "init " self)]
+      set t_kinTypeRelEgo kEgoPartner
+    ]
+    
+    let myChildren getChildrenSet self kNoInLaws kInactive
+    ask myChildren [
+      set t_isChildren true
+      set t_kinTypeRelEgo kEgoChild
+       ask partner-neighbors [
+        set t_isChildrenInLaw true
+        set t_kinTypeRelEgo kEgoChildInLaw       
+      ]
+      let myGrandChildren getChildrenSet self kNoInLaws kInactive
+      ask myGrandChildren [
+      	set t_isGrandChildren true
+      	set t_kinTypeRelEgo kEgoGrandChild
+      ]
+    ]
+  ]
+end
+
+to-report listSelect
+  let ll []
+  let ltemp []
+  
+  ifelse count actives with [t_isEgo] > 0 [
+    ifelse egoDependency = "all" [
+      set ll [t_idfamily] of actives with [t_isEgo]
+    ][
+      set ll [t_idfamily] of actives with [t_isEgo and t_dependency = egoDependency]
+    ]
+  ][
+    report []
+  ]
+
+  if partnerEgoDep != "all" [
+  	if count actives with [t_isPartner] > 0 [
+      set ltemp [t_idfamily] of actives with [t_isPartner and t_dependency = partnerEgoDep]
+      set ll (interLists ll ltemp)
+    ]
+  ]
+  
+  if inlawDep != "all" [
+  	if count actives with [t_isChildrenInLaw] > 0 [
+  		set ltemp [t_idfamily] of actives with [t_isChildrenInLaw and t_dependency = inlawDep]
+  		set ll (interLists ll ltemp)
+  	]
+  ]
+  
+  if childDep [
+  	set ltemp [t_idfamily] of actives with [t_childrenNeedCare]
+  	set ll (interLists ll ltemp)
+  ]
+  
+  report ll
+
+end
+
+to explore_showFamily [agent checkActive]
+  set gAgents_set no-turtles
+  clear-output
+  
+  let header ""
+  
+  ifelse comp? [
+    set header (word
+      "Fam" SEP
+      "Agent" SEP
+      "Ego" SEP
+      "Active" SEP
+      "age" SEP
+      "ageAct" SEP
+      "nPrt" SEP
+      "nChild" SEP
+      "nInLaws" SEP
+      "care" SEP
+      "nCareD" SEP
+      "nCareS" SEP
+      "cByPrt" SEP
+      "cByCh" SEP
+      "cByBro" SEP
+      "cByPar" SEP
+      "cToEgo" SEP
+      "cToPrt" SEP
+      "cToOth" SEP
+      )
+    set header (word header
+      "prtOth" SEP
+      "prtComp" SEP
+      "chComp" SEP
+      "othComp" SEP
+      )
+
+  ][
+    
+    set header (word
+      "Fam" SEP
+      "Agent" SEP
+      "Ego" SEP
+      "Active" SEP
+      "age" SEP
+      "ageAct" SEP
+      "mStatus" SEP
+      "nPrt" SEP
+      "nActPrt" SEP
+      "nFAprt" SEP
+      "nDeadPr" SEP
+      "nChild" SEP
+      "nActCh" SEP
+      "nFAch" SEP
+      "nDeadCh" SEP
+      "nInLaws" SEP
+      "nActInL" SEP
+      "nFAinL" SEP
+      "nDeadIL" SEP
+      "care" SEP
+      "nCareD" SEP
+      "nCareS" SEP
+      "cByPrt" SEP
+      "cByCh" SEP
+      "cByBro" SEP
+      "cByPar" SEP
+      "cToEgo" SEP
+      "cToPrt" SEP
+      "cToOth" SEP
+      )
+    set header (word header
+      "tot" SEP
+      "totL" SEP
+      "totAvl" SEP
+      "totDep" SEP
+      "totWrk" SEP
+      "totPrt" SEP
+      "totOth" SEP
+      "prtTot" SEP
+      "prtTotL" SEP
+      "prtAvlb" SEP
+      "prtDep" SEP
+      "prtWrk" SEP
+      "prtOth" SEP
+      "prtNupt" SEP
+      "prtMort" SEP
+      "prtDiv" SEP
+      "ChFert" SEP
+      "ChMort" SEP
+      "prtWrk2" SEP
+      "chWrk" SEP
+      "prtDep2" SEP
+      "chDep" SEP
+      "prtComp" SEP
+      "chComp" SEP
+      "othComp" SEP
+      "def" SEP
+      )
+
+  ]
+  
+  output-print header
+  explore_SF agent not showInactives?
+end
+
+to explore_SF [agent checkActive]
+  if (not checkActive or is-active? agent) and not member? agent gAgents_set [
+    set gAgents_set (turtle-set agent gAgents_set)
+    ask agent [
+    
+      let outPut1 ""
+      ifelse comp? [
+        set outPut1 (word
+          t_idfamily SEP
+          who SEP
+          t_isEgo SEP
+          is-active? agent SEP
+          t_age SEP
+          (t_age - tickIn) SEP
+          t_nPartner SEP
+          t_nChildren SEP
+          t_nInLaws  SEP
+          t_care SEP
+          t_netCareDemand SEP
+          t_netCareSupply SEP
+          t_carebyPartner SEP
+          t_carebyChildren SEP
+          t_carebyBrothers SEP
+          t_carebyParents SEP
+          t_careGivenToEgo SEP
+          t_careGivenToPartnerEgo SEP
+          t_careGivenToOtherRelatives SEP
+            )
+        
+        if t_isEgo [  set outPut1 (word output1
+         item kPartnerOthers t_ego-accounts SEP
+         item kCompetition_partner t_ego-accounts SEP
+         item kCompetition_children t_ego-accounts SEP
+         item kCompetition_children_family t_ego-accounts SEP
+           )
+        ]
+     ][
+        set outPut1 (word
+          t_idfamily SEP
+          who SEP
+          t_isEgo SEP
+          is-active? agent SEP
+          t_age SEP
+          (t_age - tickIn) SEP
+          t_maritalStatus SEP
+          t_nPartner SEP
+          t_nActivePartner SEP
+          t_nFutureActivePartner SEP
+          t_nDeadPartner SEP
+          t_nChildren SEP
+          t_nActiveChildren SEP
+          t_nFutureActiveChildren SEP
+          t_nDeadChildren SEP
+          t_nInLaws  SEP
+          t_nActiveInLaws SEP
+          t_nFutureActiveInLaws SEP
+          t_nDeadInLaws SEP
+          t_care SEP
+          t_netCareDemand SEP
+          t_netCareSupply SEP
+          t_carebyPartner SEP
+          t_carebyChildren SEP
+          t_carebyBrothers SEP
+          t_carebyParents SEP
+          t_careGivenToEgo SEP
+          t_careGivenToPartnerEgo SEP
+          t_careGivenToOtherRelatives SEP
+            )
+        
+        if t_isEgo [  set outPut1 (word output1
+          item kTotalHours t_ego-accounts SEP
+          item kTotalHoursLivings t_ego-accounts SEP
+          item kTotalAvailable t_ego-accounts SEP
+          item kTotalDependency t_ego-accounts SEP
+          item kTotalWork t_ego-accounts SEP
+          item kTotalPartner t_ego-accounts SEP
+          item kTotalOthers t_ego-accounts SEP
+          item kPartnerHours t_ego-accounts SEP
+          item kPartnerHoursLiving t_ego-accounts SEP
+          item kPartnerAvailable t_ego-accounts SEP
+          item kPartnerDependency t_ego-accounts SEP
+          item kPartnerWork t_ego-accounts SEP
+          item kPartnerOthers t_ego-accounts SEP
+          item kPartner_nupt t_ego-accounts SEP
+          item kNoPartner_mort t_ego-accounts SEP
+          item kNoPartner_div t_ego-accounts SEP
+          item kChildren_fert t_ego-accounts SEP
+          item kNoChildren_mort t_ego-accounts SEP
+          item kWork_partner t_ego-accounts SEP
+          item kWork2_partner t_ego-accounts SEP
+          item kWork_children t_ego-accounts SEP
+          item kWork2_children t_ego-accounts SEP
+          item kDependency_partner t_ego-accounts SEP
+          item kDependency2_partner t_ego-accounts SEP
+          item kDependency_children t_ego-accounts SEP
+          item kDependency2_health_children t_ego-accounts SEP
+          item kDependency2_age_children t_ego-accounts SEP
+          item kCompetition_partner t_ego-accounts SEP
+          item kCompetition_children t_ego-accounts SEP
+          item kCompetition_children_family t_ego-accounts SEP
+          item kDeficit t_ego-accounts SEP
+            )
+        ]
+      ]
+      
+      output-type outPut1
+      if count partner-neighbors > 0 [
+        output-type " partner "
+        output-type [who] of partner-neighbors
+      ]
+      if count my-out-descendants > 0 [
+        output-type " descendant"
+        ask my-out-descendants [
+          ask end2 [
+            output-type (word " " who)
+          ]
+        ]
+      ]
+      if count my-out-ascendants > 0 [
+        output-type (word " ascendant")
+        ask my-out-ascendants [
+          ask end2 [
+            output-type (word " " who)
+          ]
+        ]
+      ]
+      output-print ""
+
+      ask partner-neighbors [
+         explore_SF self checkActive
+      ]
+;      ask my-out-descendants [
+;         ask end2 [
+;           explore_SF self checkActive
+;         ]
+;      ]
+      ask t_childrenSet [
+ 		explore_SF self checkActive
+      ]
+    ]
+  ]
+  
+end
+
+to dd
+ output-print (word "CareGivenToEgo " gFamCareGivenToEgo " CareReceivedByEgo " gFamCareReceivedByEgo)
+end
+
+to viewFamily [what]
+  clear-patches
+  
+  set gDebug debug?
+
+  ; hide all turtles and links
+  ask turtles [set hidden? true]
+  ask links [
+     set hidden? true
+  ]
+  
+  let idrep 0
+  if famNum > 0 [
+    set idrep famNum
+    if delFam? [set famNum 0]
+  ]
+  
+  if individual > 0 [
+    set idrep [t_idfamily] of turtle individual
+    if delFam? [set individual 0]
+  ]
+  
+  if idrep = 0 [
+    let lSelect listSelect
+    set gNumFamSel length lSelect
+  
+    if empty? lSelect
+    [
+      user-message "Sorry, there are no EGOs alive!"
+      stop
+    ]
+    
+    set gViewFamIter gViewFamIter + 1
+    if gViewFamIter >= length lSelect [ set gViewFamIter 0 ]
+  
+    set idrep item gViewFamIter lSelect
+  ]
+  
+  let str_active "active"
+  let centerTurtle 0
+    
+  ask turtles with [t_idfamily = idrep ] [
+   if t_isEgo [ resetView idrep ]
+  ]
+    
+  ask turtles with [t_idfamily = idrep ] [
+      ifelse is-active? self [
+        set str_active "active"
+        set shape "circle"
+      ][
+        set str_active "inactive"
+        set shape "square"
+      ]
+      if t_isEgo [
+        set centerTurtle who
+        set shape "face happy"
+      ]
+       
+      set hidden? false
+      ifelse idind? [
+           set size 0.5
+           ifelse t_isEgo [
+            set label (word "ego " who " " str_active " " t_gender " " tickIn)
+           ][
+            set label (word who " " str_active " " t_gender " " tickIn)
+           ]
+      ] [
+           set size 2
+           set label ""
+      ]
+  
+      ;set size 1.5 
+   
+      ask my-links with [is-undirected-link? self] [
+        ifelse (not showInactives?) and ( (not is-active? end1) or (not is-active? end2) ) [
+          set hidden? true
+        ][
+          set hidden? false
+          set thickness 0.2
+        ]
+      ]   
+   
+  
+      ask my-out-descendants [
+        set hidden? false
+        set thickness 0.2
+      ]
+  
+      ifelse t_genderRecoded = 1 [
+        set color yellow
+      ][
+        set color green
+      ]
+      
+      if (not showInactives?) and (not is-active? self) [
+        set hidden? true
+      ]
+  ]
+  
+  layout-radial turtles with [t_idfamily = idrep] links with [hidden? = false] turtle centerTurtle
+  
+  ask patch 1 2 [
+    set plabel (word "family " idrep)
+    set plabel-color white
+  ]
+
+  set gDebugProc push gDebugProc "viewFamily"
+
+  ask turtle centerTurtle [
+    
+    if debug? [computeCare turtle centerTurtle true]
+      ;set size 1.5
+    if what = "list" [
+      explore_showFamily turtle centerTurtle false
+    ]
+    if what = "tree" [
+      showCare2Tree turtle centerTurtle
+    ]
+  ]
+  set gDebugProc pop gDebugProc
+   
+end
+
+to-report kinString [agent]
+  let kString ""
+  ask agent [
+    if t_kinTypeRelEgo = kEgo [ set kString "ego" ]
+    if t_kinTypeRelEgo = kEgoPartner [ set kString "egoP" ]
+    if t_kinTypeRelEgo = kEgoChild [ set kString "child" ]
+    if t_kinTypeRelEgo = kEgoChildInLaw [ set kString "cInLaw" ]
+    if t_kinTypeRelEgo = kEgoGrandChild [ set kString "gChild" ]
+  ]
+  
+  if kString = "" [ print who ]
+  report kString
+end
+
+to-report kinCare2String [kinRel]
+  let kType ""
+  
+  if kinRel = kEgoToPartner [set kType "ego->egoP"]
+  if kinRel = kEgoPartnerToEgo [set kType "egoP->ego"]
+  if kinRel = kEgoToChild [set kType "ego->child"]
+  if kinRel = kEgoPartnerToChild [set kType "egoP->child"]
+  if kinRel = kChildToEgo [set kType "child->ego"]
+  if kinRel = kChildToEgoPartner [set kType "child->egoP"]
+  if kinRel = kChildToSibling [set kType "child<->child"]
+  if kinRel = kChildToPartner [set kType "child->partner"]
+  if kinRel = kChildInLawToChild [set kType "child<-partner"]
+  if kinRel = kChildToGrandChild [set kType "child->gChild"]
+  if kinRel = kChildInLawToGrandChild [set kType "cInLaw->gChild"]
+  if kinRel = kGrandChildToChild [set kType "gChild->child"]
+  if kinRel = kGrandChildToChildInLaw [set kType "gChild->cInLaw"]
+  if kinRel = kGrandChildToSibling [set kType "gChild<->gChild"]
+
+  report kType
+end
+
+to-report processCare2List [aList]
+  let outList []
+  let kCare2S ""
+  foreach aList [
+    elt ->
+    if gDebug [ print elt ]
+    set kCare2S kinCare2String item 1 elt
+    set outList sentence outList (list (item 0 elt) kCare2S (item 2 elt))
+  ]
+  report outList
+end
+
+to printInfoCare2 [agent]
+  if not is-active? agent [stop]
+  let output1 ""
+  
+  ask agent [
+    let fromList processCare2List t_care2From_list
+    let toList processCare2List t_care2To_list
+    
+    set output1 (word
+      who SEP
+      kinString self SEP
+      t_care2 SEP
+      t_care2Demand SEP
+      t_care2Supply
+    )
+    
+    ifelse comp? [
+      if length t_care2CompCount > 0 [
+        set output1 (word output1 SEP
+          item kCare2EgoPToChild t_care2CompCount SEP
+          item kCare2ChildToEgoP t_care2CompCount SEP
+          item kCare2ChildToPartner t_care2CompCount SEP
+          item kCare2ChildToSibling t_care2CompCount SEP
+          item kCare2ChildToGrandChild t_care2CompCount SEP
+          item kCare2EgoPToEgo t_care2CompCount SEP
+          item kCare2ChildToEgo t_care2CompCount SEP
+        )
+      ]
+    ][
+      set output1 (word output1
+        " F: " processCare2List t_care2From_list SEP
+        " T: " processCare2List t_care2To_list 
+        )
+    ]
+  ]
+  print output1
+  
+  ifelse comp? [
+  ][
+    ;report 0
+  ]
+end
+
+to-report sumList [aList1 aList2]
+  let ind 0
+  repeat length(aList1) [
+    set aList1 replace-item ind aList1 ( (item ind aList1) + (item ind aList2) )
+    set ind (ind + 1)
+  ]
+  report aList1
+end
+
+to showCare2Tree [agentEgo]
+  if delFam? [clear-output]
+  
+  let header (word
+    "who" SEP
+    "kin" SEP
+    "care" SEP
+    "nCareD" SEP
+    "nCareS"
+    )
+  
+  if comp? [ set header (word
+    header SEP
+    "EgoPCh" SEP
+    "chEgoP" SEP
+    "chPrtnr" SEP
+    "chSib" SEP
+    "chGch" SEP
+    "EgoPego" SEP
+    "chEgo"
+    )
+  ]
+  
+  print header
+  
+  ask agentEgo [
+    printInfoCare2 self
+    
+    ask partner-neighbors [
+      printInfoCare2 self
+    ]
+    
+    let myChildren getChildrenSet self kNoInLaws kActive
+    ask myChildren [
+      printInfoCare2 self
+
+      ask partner-neighbors [
+        printInfoCare2 self
+      ]
+      let myGrandChildren getChildrenSet self kNoInLaws kActive
+      ask myGrandChildren [
+        printInfoCare2 self
+      ]
+
+    ] ; ask myChildren
+  ] ; ask agentEgo
+
+end
+
+to pushDebugProc [elt]
+  set gDebugProc push gDebugProc elt
+end
+
+to popDebugProc
+  set gDebugProc pop gDebugProc
+end
+
+to-report push [aList elt]
+  report (sentence aList elt)
+end
+
+to-report pop [aList]
+  report (remove-item (length aList - 1) aList)
+end

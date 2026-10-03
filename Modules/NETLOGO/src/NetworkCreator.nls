@@ -1,0 +1,95 @@
+to CreateNetwork [n]
+  foreach n [
+    net ->
+    let idfam item 3 net
+    ask turtle (item 0 net) [
+      ifelse item 2 net = "M" [
+        create-partner-with turtle (item 1 net) [
+          set color blue
+        ]
+        set t_maritalStatus kMarried
+        set t_idpartner turtle (item 1 net)
+        set t_idfamily idfam
+        ask turtle (item 1 net) [
+          set t_idpartner (item 0 net) ;[who] of myself
+          set t_idfamily idfam
+        ]
+      ] [
+        set t_childrenSet (turtle-set turtle (item 1 net) t_childrenSet)
+        create-ascendant-from turtle (item 1 net) [
+          set color black
+        ]
+        create-descendant-to turtle (item 1 net) [
+          set color red
+        ]
+        set t_idfamily idfam
+        ask turtle (item 1 net) [
+          set t_idfamily idfam
+        ]
+      ]
+    ]
+  ]
+  set g_nEgos 0
+  let cPartnerEgos 0
+  let cChildren 0
+  let cInLaws 0
+
+  countEgos
+  print (word "Turtles: " count turtles)
+  
+  ask turtles with [t_gender = "M"] [
+   let aSet no-turtles
+   ask partner-neighbors [set aSet t_childrenSet]
+   set t_childrenSet aSet
+  ]
+  
+  ask turtles with [t_isEgo] [
+  
+    set t_ego-accounts n-values kLengthEgoAccount [0]
+    
+    set g_nEgos g_nEgos + 1
+
+    ask partner-neighbors [
+      set cPartnerEgos cPartnerEgos + 1
+      set t_isPartner true
+      set t_kinTypeRelEgo kEgoPartner
+    ]
+    if count partner-neighbors > 0 [set t_hasPartnerEgo true]
+    
+    let myChildren getChildrenSet self kNoInLaws kInactive
+    let tInLaws false
+    ask myChildren [
+      set cChildren cChildren + 1
+      set t_isChildren true
+      set t_kinTypeRelEgo kEgoChild
+       ask partner-neighbors [
+        set cInLaws cInLaws + 1
+        set tInLaws true
+        set t_isChildrenInLaw true
+        set t_kinTypeRelEgo kEgoChildInLaw       
+      ]
+      let myGrandChildren getChildrenSet self kNoInLaws kInactive
+      ask myGrandChildren [
+      	set t_isGrandChildren true
+      	set t_kinTypeRelEgo kEgoGrandChild
+      ]
+    ]
+    if count myChildren > 0 [set t_hasChildrenEgo true]
+    set tInLaws true
+  ]
+  output-print (word "TOTAL == egos: " g_nEgos " partners: " cPartnerEgos " children: " cChildren " inLaws: " cInLaws)
+  output-print (word "ACTIVES == egos: " count actives with [t_isEgo] " partners: " count actives with [t_isPartner] " children: " count actives with [t_isChildren] " inLaws: " count actives with [t_isChildrenInLaw])
+  
+  ask turtles [
+    let myPartners countPartner self kInactive
+    set t_nPartner count myPartners
+    let myChildren getChildrenSet self kNoInLaws kInactive
+    set t_nChildren count myChildren
+    let myInLaws getChildrenSet self kOnlyInLaws kInactive
+    set t_nInLaws count myInLaws
+    ; if debug [ print (word who " fam: " t_idfamily " myChildren " t_nChildren " myInLaws " t_nInLaws) ]
+  ]
+
+end
+  
+  

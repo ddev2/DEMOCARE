@@ -1,0 +1,11 @@
+;to ego-rule-partner
+;  if (any? partner-neighbors with [care > 0]) [
+;    let idpartnerc item 0 [who] of partner-neighbors
+;    if is-active? turtle idpartner [
+;      if (care > 0) [ set care 0 ]
+;      if (abs care = [care] of turtle idpartnerc )[ set carebypartner abs care]
+;      if (abs care < [care] of turtle idpartnerc )[ set carebypartner abs care]
+;      if (abs care > [care] of turtle idpartnerc )[ set carebypartner [care] of turtle idpartnerc]
+;    ]
+;  ]
+;end

@@ -1,0 +1,92 @@
+to AssignDependency [file]
+  file-close-all
+  file-open file
+  let header file-read-line
+  let counter 1
+  let separator ","
+  let dependencyTable []
+  foreach n-values (length header) [ ?1 -> ?1 ] [ ?1 ->
+    if item ?1 header = "," [
+      set counter counter + 1
+    ]
+  ]
+  while [not file-at-end?] [
+    let allFields []
+    let tvar file-read-line
+    foreach n-values counter [ ?1 -> ?1 ] [
+      let cut ifelse-value (position separator tvar != false) [(position separator tvar)] [length tvar]
+      let field substring tvar 0 cut
+      carefully [
+        if is-number? read-from-string field [
+          set field read-from-string field
+        ]
+      ] [
+      ]
+      set allFields lput field allFields
+      if (position separator tvar != false) [
+        set tvar substring tvar ((position separator tvar) + 1) length tvar
+      ]
+    ]
+    set dependencyTable lput allFields dependencyTable
+  ]
+  
+  ; Remove dependency levels = 0, only levels > 0 are assigned, 0-levels are the remainder
+  ; As a stand-alone reporter this could be: /* set dependencyTable filter [row -> item 0 row = 0] dependencyTable */
+  ; but here it is still needed for case-testing
+  let filteredDependencyTable filter [row -> item 0 row != 0] dependencyTable
+  
+  ; BUG FIX (2026-08-18): the old code below assigned dependency levels with
+  ; nested foreach loops over dependencyLevel/statusLevel/sexLevel/ageLevel,
+  ; picking "nAgents = round(proportion * count(remaining pool))" turtles via
+  ; n-of for each level IN SEQUENCE (level 1, then 2, then 3). Because the
+  ; pool ("statusAgentSubset ... and t_dependency = 0") was recomputed fresh
+  ; at the top of each statusLevel loop *within* each dependencyLevel pass,
+  ; level 2's quota was computed against the pool already shrunk by level 1's
+  ; assignments, and level 3's against the pool shrunk by both -- instead of
+  ; against the true total for that status/sex/age cell. This systematically
+  ; under-assigned the higher dependency levels whenever a cell's combined
+  ; P(dependency>0) was non-trivial (confirmed on the real population: this
+  ; method assigns dependency>0 to ~5,391 individuals where a correct
+  ; independent-draw method assigns ~5,824 -- about 8% low). It never
+  ; compounds tick-to-tick because UpdateDependency [DependencyTransitionsUpdate.nls]
+  ; already does a correct independent per-individual draw; this bug only
+  ; affects the one-time tick-0 snapshot built here.
+  ;
+  ; Replaced with a per-agent independent cumulative-probability draw, the
+  ; same pattern used by sample_categorical()/init_dependency() in the R
+  ; ports (computeCare_baseR.R / computeCare_tidyverse.R): for each
+  ; individual, look up their own status/sex/age row(s) in the dependency
+  ; table (sorted by dependency level ascending), draw one uniform random
+  ; number, and walk the cumulative probabilities to pick the first level
+  ; whose running total exceeds the draw (remaining at t_dependency = 0, the
+  ; implicit remainder category, if none does).
+  ask turtles with [t_dependency = 0] [
+    let myStatus t_status
+    let mySex t_gender
+    let myAge t_age
+    let myRows filter [
+      row ->
+      item 1 row = myStatus and item 2 row = mySex and (
+        (item 4 row = 20 and myAge <= 20) or
+        (item 4 row = 105 and myAge >= 105) or
+        item 4 row = myAge
+      )
+    ] filteredDependencyTable
+    if not empty? myRows [
+      let sortedRows sort-by [ [a b] -> item 0 a < item 0 b ] myRows
+      let dice random-float 1
+      let cum 0
+      let assigned false
+      foreach sortedRows [
+        row ->
+        if not assigned [
+          set cum cum + item 5 row
+          if dice < cum [
+            set t_dependency item 0 row
+            set assigned true
+          ]
+        ]
+      ]
+    ]
+  ]
+end
