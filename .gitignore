@@ -5,6 +5,10 @@
 !.gitignore
 !README.md
 !docs/**
+# >>> Claude 2026-10-03
+!Democare 2026.docx
+!Democare 2026.pdf
+# <<< Claude 2026-10-03
 !Modules/**/README.md
 !Modules/computeCare_R/*.R
 !Modules/R PAPER/R code/*.R

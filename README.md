@@ -48,6 +48,9 @@ A full run on the reference population (about 65,000 individuals and 10,000 egos
 
 ## Documentation
 
+<!-- >>> Claude 2026-10-03 -->
+- [`Democare 2026.pdf`](Democare%202026.pdf): the complete documentation in PDF, made from the Word file [`Democare 2026.docx`](Democare%202026.docx), which is the master copy
+<!-- <<< Claude 2026-10-03 -->
 <!-- >>> Claude 2026-10-02 -->
 - [`docs/Democare_2026.md`](docs/Democare_2026.md): the complete documentation, converted from the Word file `Democare 2026.docx` (regenerate it with `docs/tools/docx_to_md.py`)
 <!-- <<< Claude 2026-10-02 -->

@@ -136,6 +136,11 @@ def main():
     for block in code[5:]:
         first_line = block.split('\n')[0]
         cands = [first_line.replace('<', '\\<').replace('#', '\\#'), first_line]
+        # >>> Claude 2026-10-03
+        # pandoc can also escape underscores and other Markdown characters
+        cands.append(first_line.replace('_', '\\_').replace('<', '\\<').replace('#', '\\#'))
+        cands.append(re.sub(r'([\\`*_\[\]<>#|~])', r'\\\1', first_line))
+        # <<< Claude 2026-10-03
         i = -1
         for c in cands:
             m = re.search(r'\n' + re.escape(c) + r'(  )?\n', md)
